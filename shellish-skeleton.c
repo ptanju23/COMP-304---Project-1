@@ -350,7 +350,7 @@ int process_command(struct command_t *command) {
 	    dir = strtok(NULL, ":"); //go to next dir for iteration
     }
     printf("-%s: %s: command not found\n", sysname, command->name);
-    free(copyPath); //mem leak countermeasure
+    free(copyPath); //mem leak counter
     exit(127);
   } else {
     if(command->background) { //'&' arg passed case aka bg case
