@@ -353,7 +353,6 @@ int process_command(struct command_t *command) {
     free(copyPath); //mem leak countermeasure
     exit(127);
   } else {
-    // TODO: implement background processes here
     if(command->background) { //'&' arg passed case aka bg case
 	    return SUCCESS; //don't wait, return immediately
     } 
