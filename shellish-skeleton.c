@@ -6,6 +6,7 @@
 #include <sys/wait.h>
 #include <termios.h> // termios, TCSANOW, ECHO, ICANON
 #include <unistd.h>
+#include <fcntl.h> // for open() and flags and stuff
 const char *sysname = "shellish";
 
 enum return_codes {
@@ -337,6 +338,26 @@ int process_command(struct command_t *command) {
 
     // TODO: do your own exec with path resolving using execv()
     // do so by replacing the execvp call below
+    
+
+    //part 2
+    int ioflag;
+    if (command->redirects[0] != NULL) { //i/o case 1: stdin
+	    ioflag = open(command->redirects[0], O_RDONLY); //read permission + address provided)
+	    dup2(ioflag, 0); //replace stdin
+	    close(ioflag);
+    }
+    if (command->redirects[1] != NULL) { //i/o case 2: stdout w/ truncate 
+	    ioflag = open(command->redirects[1], O_WRONLY | O_CREAT | O_TRUNC, 0644); //ready to write into given file
+	    dup2(ioflag, 1); //replace stdout
+	    close(ioflag);
+    }
+    if (command->redirects[2] != NULL) { //i/o case 3: stdout w/ append
+	    ioflag = open(command->redirects[2], O_WRONLY | O_CREAT | O_APPEND, 0644); //same as #2 except append/truncate thingy
+	    dup2(ioflag, 1);
+	    close(ioflag);
+    }
+    //part 1
     char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
     char *copyPath = strdup(getPath); //tokenizer edit countermeasure
     char *dir = strtok(copyPath, ":"); //first dir from path string
