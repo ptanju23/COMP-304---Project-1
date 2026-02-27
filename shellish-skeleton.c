@@ -318,10 +318,16 @@ int shellish_cut(struct command_t *command) {
 			delim = command->args[i+1][0];
 			i++; //skips next since it's determined as the delim
 		}
+		else if ((strncmp(command->args[i], "-d", 2) == 0 && command->args[i][2] != '\0')){
+			delim = command->args[i][2];
+		} // dC case, where C = char
        		else if ((strcmp(command->args[i], "-f") == 0 || strcmp(command->args[i], "--fields") == 0) && command->args[i+1] != NULL) { //-f case - same logic as -d
            		fields= command->args[i+1];
             		i++; //same logic once again
        		}
+		else if (strncmp(command->args[i], "-f", 2) == 0 && command->args[i][2] != '\0'){
+			fields = &command->args[i][2];
+		}
 	}
 	if (fields == NULL) return UNKNOWN; //if args are empty, return
 	
@@ -335,32 +341,58 @@ int shellish_cut(struct command_t *command) {
 	
 	char *tok = strtok(temp, ","); //now the fun part
 	while (tok != NULL && num_fields < 128) {
-		fields[num_fields++] = atoi(tok); //yeah, this one's painful - was warned quite nicely :/
-		tok = strtok(NULL; ",");
+		fields_arr[num_fields++] = atoi(tok); //yeah, this one's painful - was warned quite nicely :/
+		tok = strtok(NULL, ",");
 	} // we're done, yay!
 	
 	char line[4096]; //lots and lots just in case
 	while (fgets(line, sizeof(line), stdin) != NULL) {
 
-	char *parts[1024];
-        int num_parts = 0;
-        char d[2] = { delim, '\0' }; //either delim or terminate string 
+	// Remove trailing newline - i forgor before...
+	line[strcspn(line, "\n")] = '\0';
 
-        char *p = strtok(line, d);
-        while (p != NULL && num_parts < 1024) {
-            parts[num_parts++] = p;
-            p = strtok(NULL, d);
-        }
+	// manual split - cause i need the empty parts which strtok cut out before... i had to replace the code -_-
+	char *parts[1024];
+	int num_parts = 0;
+
+	char *start = line;
+	char *cur = line;
+
+	while (1) {
+    	  if (*cur == delim || *cur == '\0') {
+        	if (num_parts < 1024) {
+            		parts[num_parts++] = start;   // start of this field
+        	}
+
+        	if (*cur == '\0') {
+            		break; // end of line
+        	}
+
+        	*cur = '\0';      // terminate this field
+        	cur++;            // move past delimiter
+        	start = cur;      // next field starts here
+        	continue;
+    	  }
+    	cur++;
+	}	
+
+	//char *parts[1024];
+        //int num_parts = 0;
+        //char d[2] = { delim, '\0' }; //either delim or terminate string 
+
+        //char *tokptr = strtok(line, d);
+        //while (tokptr != NULL && num_parts < 1024) {
+          //  parts[num_parts++] = tokptr;
+           // tokptr = strtok(NULL, d);
+        //}
 
         for (int k = 0; k < num_fields; k++) {
-            int l = fields[k];    
+            int l = fields_arr[k];    
             if (k > 0) putchar(delim);
             if (l >= 1 && l <= num_parts) {
                 fputs(parts[l - 1], stdout);
             } 
-	    else {
-                fprint("Outta range");
-            }
+	    
         }
         putchar('\n');
     }
@@ -415,6 +447,10 @@ int process_command(struct command_t *command) {
 	    		dup2(ioflag, 1);
 	    		close(ioflag); //i give up from shifting, sorry for bad readability
     }
+
+//part3
+    if (strcmp(command->name, "cut") == 0) {
+    exit(shellish_cut(command));}
     //part 1
     char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
     char *copyPath = strdup(getPath); //tokenizer edit countermeasure
@@ -457,6 +493,11 @@ int process_command(struct command_t *command) {
 	    dup2(ioflag, 1);
 	    close(ioflag);
     }
+
+    //part3
+if (strcmp(command->next->name, "cut") == 0) {
+    exit(shellish_cut(command->next));}
+
     //part 1
     char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
     char *copyPath = strdup(getPath); //tokenizer edit countermeasure
@@ -524,6 +565,11 @@ int process_command(struct command_t *command) {
 	    dup2(ioflag, 1);
 	    close(ioflag);
     }
+
+    //part 3
+if (strcmp(command->name, "cut") == 0) {
+    exit(shellish_cut(command));
+}
     //part 1
     char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
     char *copyPath = strdup(getPath); //tokenizer edit countermeasure
