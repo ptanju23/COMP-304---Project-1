@@ -323,7 +323,109 @@ int process_command(struct command_t *command) {
       return SUCCESS;
     }
   }
+  
+  if (command-> next != NULL) {
+	  int piperw[2]; //determines read (0) or write (1) end of pipe
+	  if (pipe(piperw) == -1) return UNKNOWN; //failed to create pipe case
+	  pid_t left = fork();
+	  if (left == 0) { //child case - the one to be read
+		  close(piperw[0]);
+		  dup2(piperw[1], STDOUT_FILENO); 
+		  close(piperw[1]); //only need stdout now so close
+		  
+		 //part 2
+    		int ioflag;
+    		if (command->redirects[0] != NULL) { //i/o case 1: stdin
+	    		ioflag = open(command->redirects[0], O_RDONLY); //read permission + address provided)
+	    		dup2(ioflag, 0); //replace stdin
+	    		close(ioflag);
+    }
+    		if (command->redirects[1] != NULL) { //i/o case 2: stdout w/ truncate 
+	    		ioflag = open(command->redirects[1], O_WRONLY | O_CREAT | O_TRUNC, 0644); //ready to write into given file
+	    		dup2(ioflag, 1); //replace stdout
+	    		close(ioflag);
+    }
+    		if (command->redirects[2] != NULL) { //i/o case 3: stdout w/ append
+	    		ioflag = open(command->redirects[2], O_WRONLY | O_CREAT | O_APPEND, 0644); //same as #2 except append/truncate thingy
+	    		dup2(ioflag, 1);
+	    		close(ioflag); //i give up from shifting, sorry for bad readability
+    }
+    //part 1
+    char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
+    char *copyPath = strdup(getPath); //tokenizer edit countermeasure
+    char *dir = strtok(copyPath, ":"); //first dir from path string
+    while (dir != NULL) {
+	    //logic code
+	    //get dir -> check for command (use access) -> if there execv, if not cont
+	    char *moreDir = strdup(dir);
+	    strcat (moreDir, "/"); //for dir/name to form path correctly
+	    strcat(moreDir, command->name);
+	    moreDir = strdup(moreDir); //i hope this doesnt crash mate
+	    if (access(moreDir, X_OK) == 0) {execv(moreDir, command->args);} //find it? exec it. if not, will come back anyway
+	    dir = strtok(NULL, ":"); //go to next dir for iteration
+    }
+    printf("-%s: %s: command not found\n", sysname, command->name);
+    free(copyPath); //mem leak countermeasure
+    exit(127);			  
 
+	  }
+    pid_t right = fork(); //next child aka command->next one
+    	if (right == 0) {
+		dup2(piperw[0], STDIN_FILENO); //set stdin here
+		close(piperw[0]);
+		close(piperw[1]); //only care about stdin
+
+		 //part 2
+    int ioflag;
+    if (command->next->redirects[0] != NULL) { //i/o case 1: stdin
+	    ioflag = open(command->next->redirects[0], O_RDONLY); //read permission + address provided)
+	    dup2(ioflag, 0); //replace stdin
+	    close(ioflag);
+    }
+    if (command->next->redirects[1] != NULL) { //i/o case 2: stdout w/ truncate 
+	    ioflag = open(command->next->redirects[1], O_WRONLY | O_CREAT | O_TRUNC, 0644); //ready to write into given file
+	    dup2(ioflag, 1); //replace stdout
+	    close(ioflag);
+    }
+    if (command->next->redirects[2] != NULL) { //i/o case 3: stdout w/ append
+	    ioflag = open(command->next->redirects[2], O_WRONLY | O_CREAT | O_APPEND, 0644); //same as #2 except append/truncate thingy
+	    dup2(ioflag, 1);
+	    close(ioflag);
+    }
+    //part 1
+    char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
+    char *copyPath = strdup(getPath); //tokenizer edit countermeasure
+    char *dir = strtok(copyPath, ":"); //first dir from path string
+    while (dir != NULL) {
+	    //logic code
+	    //get dir -> check for command (use access) -> if there execv, if not cont
+	    char *moreDir = strdup(dir);
+	    strcat (moreDir, "/"); //for dir/name to form path correctly
+	    strcat(moreDir, command->next->name);
+	    moreDir = strdup(moreDir); //i hope this doesnt crash mate
+	    if (access(moreDir, X_OK) == 0) {execv(moreDir, command->next->args);} //find it? exec it. if not, will come back anyway
+	    dir = strtok(NULL, ":"); //go to next dir for iteration
+    }
+    printf("-%s: %s: command not found\n", sysname, command->next->name);
+    free(copyPath); //mem leak countermeasure
+    exit(127);
+	}
+
+	close(piperw[0]);
+	close(piperw[1]); //parent code doesn't need these
+	
+    if(command->background) { //'&' arg passed case aka bg case
+            return SUCCESS; //don't wait, return immediately
+    }
+    waitpid(left, NULL, 0);
+   waitpid(right, NULL, 0);  // wait for child processes to finish
+    return SUCCESS;
+
+
+
+
+  }
+  else {
   pid_t pid = fork();
   if (pid == 0) // child
   {
@@ -367,6 +469,7 @@ int process_command(struct command_t *command) {
 	    char *moreDir = strdup(dir);
 	    strcat (moreDir, "/"); //for dir/name to form path correctly
 	    strcat(moreDir, command->name);
+	    moreDir = strdup(moreDir); //i hope this doesnt crash mate
 	    if (access(moreDir, X_OK) == 0) {execv(moreDir, command->args);} //find it? exec it. if not, will come back anyway
 	    dir = strtok(NULL, ":"); //go to next dir for iteration
     }
@@ -379,6 +482,7 @@ int process_command(struct command_t *command) {
     } 
     wait(0); // wait for child process to finish
     return SUCCESS;
+  }
   }
 }
 
