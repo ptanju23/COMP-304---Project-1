@@ -307,6 +307,71 @@ int prompt(struct command_t *command) {
   return SUCCESS;
 }
 
+//part 3a: shellish-cut
+
+int shellish_cut(struct command_t *command) {
+	char delim = '\t'; //default setting
+	char *fields = NULL; //ptr for the indice fields (1,3,10 given in pdf)
+	
+	for (int i=1; command->args[i] != NULL; i++) {
+		if ((strcmp(command->args[i], "-d") == 0 || strcmp(command->args[i], "--delimiter") == 0) && command->args[i+1] != NULL) { //-d case - do we have -d arg & some more args afterwards to use as delim?
+			delim = command->args[i+1][0];
+			i++; //skips next since it's determined as the delim
+		}
+       		else if ((strcmp(command->args[i], "-f") == 0 || strcmp(command->args[i], "--fields") == 0) && command->args[i+1] != NULL) { //-f case - same logic as -d
+           		fields= command->args[i+1];
+            		i++; //same logic once again
+       		}
+	}
+	if (fields == NULL) return UNKNOWN; //if args are empty, return
+	
+	//now, we are parsing the fields to an array for easier handling (yay!)
+	int fields_arr[128]; //positive integers
+	int num_fields = 0; //index for looping
+
+	char temp[256]; //since we're going to tokenize
+	strncpy(temp, fields, sizeof(temp) - 1);
+	temp[sizeof(temp) -1] = '\0'; //don't forget null terminator!!
+	
+	char *tok = strtok(temp, ","); //now the fun part
+	while (tok != NULL && num_fields < 128) {
+		fields[num_fields++] = atoi(tok); //yeah, this one's painful - was warned quite nicely :/
+		tok = strtok(NULL; ",");
+	} // we're done, yay!
+	
+	char line[4096]; //lots and lots just in case
+	while (fgets(line, sizeof(line), stdin) != NULL) {
+
+	char *parts[1024];
+        int num_parts = 0;
+        char d[2] = { delim, '\0' }; //either delim or terminate string 
+
+        char *p = strtok(line, d);
+        while (p != NULL && num_parts < 1024) {
+            parts[num_parts++] = p;
+            p = strtok(NULL, d);
+        }
+
+        for (int k = 0; k < num_fields; k++) {
+            int l = fields[k];    
+            if (k > 0) putchar(delim);
+            if (l >= 1 && l <= num_parts) {
+                fputs(parts[l - 1], stdout);
+            } 
+	    else {
+                fprint("Outta range");
+            }
+        }
+        putchar('\n');
+    }
+
+    return 0;
+
+	
+
+
+}
+
 int process_command(struct command_t *command) {
   int r;
   if (strcmp(command->name, "") == 0)
