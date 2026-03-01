@@ -1,5 +1,9 @@
 # Shell-ish (COMP304)
 
+```txt
+https://github.com/ptanju23/COMP-304---Project-1.git
+```
+
 Shell-ish is a small Unix-like shell written in **C**. It reads a command line, parses it into commands/arguments, and executes programs using `fork()` + `execv()`.
 
 ---
