@@ -422,131 +422,95 @@ int process_command(struct command_t *command) {
   }
   
   if (command-> next != NULL) {
-	  int piperw[2]; //determines read (0) or write (1) end of pipe
-	  if (pipe(piperw) == -1) return UNKNOWN; //failed to create pipe case
-	  pid_t left = fork();
-	  if (left == 0) { //child case - the one to be read
-		  close(piperw[0]);
-		  dup2(piperw[1], STDOUT_FILENO); 
-		  close(piperw[1]); //only need stdout now so close
-		  
-		 //part 2
-    		int ioflag;
-    		if (command->redirects[0] != NULL) { //i/o case 1: stdin
-	    		ioflag = open(command->redirects[0], O_RDONLY); //read permission + address provided)
-	    		dup2(ioflag, 0); //replace stdin
-	    		close(ioflag);
-    }
-    		if (command->redirects[1] != NULL) { //i/o case 2: stdout w/ truncate 
-	    		ioflag = open(command->redirects[1], O_WRONLY | O_CREAT | O_TRUNC, 0644); //ready to write into given file
-	    		dup2(ioflag, 1); //replace stdout
-	    		close(ioflag);
-    }
-    		if (command->redirects[2] != NULL) { //i/o case 3: stdout w/ append
-	    		ioflag = open(command->redirects[2], O_WRONLY | O_CREAT | O_APPEND, 0644); //same as #2 except append/truncate thingy
-	    		dup2(ioflag, 1);
-	    		close(ioflag); //i give up from shifting, sorry for bad readability
-    }
+    //renewed: now can handle multi-piping (not just two: left and right...)
+	  int num_cmd = 0;
+	  struct command_t *temp = command;
+	  while (temp != NULL) {num_cmd++; temp = temp->next;} //iterate to get total pipe count
+	  int (*piperw)[2] = malloc(sizeof(int[2]) * (num_cmd - 1)); //read&write keep for every pipe
+	  if (piperw == NULL) return UNKNOWN; //mem coulnd't be alloced case
 
-//part3
-    if (strcmp(command->name, "cut") == 0) {
-    exit(shellish_cut(command));}
-    //part 1
-    char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
-    char *copyPath = strdup(getPath); //tokenizer edit countermeasure
-    char *dir = strtok(copyPath, ":"); //first dir from path string
-    while (dir != NULL) {
-	    //logic code
-	    //get dir -> check for command (use access) -> if there execv, if not cont
-	    char *moreDir = strdup(dir);
-	    strcat (moreDir, "/"); //for dir/name to form path correctly
-	    strcat(moreDir, command->name);
-	    moreDir = strdup(moreDir); //i hope this doesnt crash mate
-	    if (access(moreDir, X_OK) == 0) {execv(moreDir, command->args);} //find it? exec it. if not, will come back anyway
-	    dir = strtok(NULL, ":"); //go to next dir for iteration
-    }
-    printf("-%s: %s: command not found\n", sysname, command->name);
-    free(copyPath); //mem leak countermeasure
-    exit(127);			  
-
+	  for (int i = 0; i < num_cmd - 1; i++) {
+     	  if (pipe(piperw[i]) == -1) return UNKNOWN; //pipe init issue handle
 	  }
-    pid_t right = fork(); //next child aka command->next one
-    	if (right == 0) {
-		dup2(piperw[0], STDIN_FILENO); //set stdin here
-		close(piperw[0]);
-		close(piperw[1]); //only care about stdin
 
-		 //part 2
-    int ioflag;
-    if (command->next->redirects[0] != NULL) { //i/o case 1: stdin
-	    ioflag = open(command->next->redirects[0], O_RDONLY); //read permission + address provided)
-	    dup2(ioflag, 0); //replace stdin
-	    close(ioflag);
+    pid_t *childs = malloc(sizeof(pid_t) * num_cmd); //honestly forgot about this in the prev implementation...
+    if (childs == NULL) return UNKNOWN; //no memory alloc case
+
+    struct command_t *curr = command;
+
+    for (int i = 0; i < num_cmd; i++) {
+
+    childs[i] = fork();
+
+    if (childs[i] == 0) {
+
+        //pipe connect logic
+        if (i > 0) { //not the first pipe, so takes input from prev one                
+          dup2(piperw[i - 1][0], 0);
+        }
+        if (i < num_cmd - 1) { //not last pipe, so outputs to next pipe
+            dup2(piperw[i][1], 1);
+        }
+
+        //iterate and close all
+        for (int j = 0; j < num_cmd - 1; j++) {
+            close(piperw[j][0]);
+            close(piperw[j][1]);
+        }
+
+        //pipe rw logic
+        int ioflag;
+        if (curr->redirects[0] != NULL) {
+            ioflag = open(curr->redirects[0], O_RDONLY);
+            dup2(ioflag, 0);
+            close(ioflag);
+        }
+        if (curr->redirects[1] != NULL) {
+            ioflag = open(curr->redirects[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(ioflag, 1);
+            close(ioflag);
+        }
+        if (curr->redirects[2] != NULL) {
+            ioflag = open(curr->redirects[2], O_WRONLY | O_CREAT | O_APPEND, 0644);
+            dup2(ioflag, 1);
+            close(ioflag);
+        }
+
+        //part 3 - cut called here
+        if (strcmp(curr->name, "cut") == 0) {
+            exit(shellish_cut(curr));
+        }
+
+        //part 1 - pretty much same as no-pipe
+        char *getPath = getenv("PATH");
+        char *copyPath = strdup(getPath);
+        char *dir = strtok(copyPath, ":");
+
+        while (dir != NULL) {
+            char *moreDir = strdup(dir);
+            strcat(moreDir, "/");
+            strcat(moreDir, curr->name);
+            moreDir = strdup(moreDir);
+
+            if (access(moreDir, X_OK) == 0) {
+                execv(moreDir, curr->args);
+            }
+            dir = strtok(NULL, ":");
+        }
+
+        printf("-%s: %s: command not found\n", sysname, curr->name);
+        free(copyPath);
+        exit(127);
     }
-    if (command->next->redirects[1] != NULL) { //i/o case 2: stdout w/ truncate 
-	    ioflag = open(command->next->redirects[1], O_WRONLY | O_CREAT | O_TRUNC, 0644); //ready to write into given file
-	    dup2(ioflag, 1); //replace stdout
-	    close(ioflag);
-    }
-    if (command->next->redirects[2] != NULL) { //i/o case 3: stdout w/ append
-	    ioflag = open(command->next->redirects[2], O_WRONLY | O_CREAT | O_APPEND, 0644); //same as #2 except append/truncate thingy
-	    dup2(ioflag, 1);
-	    close(ioflag);
-    }
 
-    //part3
-if (strcmp(command->next->name, "cut") == 0) {
-    exit(shellish_cut(command->next));}
-
-    //part 1
-    char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
-    char *copyPath = strdup(getPath); //tokenizer edit countermeasure
-    char *dir = strtok(copyPath, ":"); //first dir from path string
-    while (dir != NULL) {
-	    //logic code
-	    //get dir -> check for command (use access) -> if there execv, if not cont
-	    char *moreDir = strdup(dir);
-	    strcat (moreDir, "/"); //for dir/name to form path correctly
-	    strcat(moreDir, command->next->name);
-	    moreDir = strdup(moreDir); //i hope this doesnt crash mate
-	    if (access(moreDir, X_OK) == 0) {execv(moreDir, command->next->args);} //find it? exec it. if not, will come back anyway
-	    dir = strtok(NULL, ":"); //go to next dir for iteration
-    }
-    printf("-%s: %s: command not found\n", sysname, command->next->name);
-    free(copyPath); //mem leak countermeasure
-    exit(127);
-	}
-
-	close(piperw[0]);
-	close(piperw[1]); //parent code doesn't need these
-	
-    if(command->background) { //'&' arg passed case aka bg case
-            return SUCCESS; //don't wait, return immediately
-    }
-    waitpid(left, NULL, 0);
-   waitpid(right, NULL, 0);  // wait for child processes to finish
-    return SUCCESS;
-
-
+    curr = curr->next;
+  }
 
 
   }
   else {
   pid_t pid = fork();
-  if (pid == 0) // child
-  {
-
-	/// This shows how to do exec with environ (but is not available on MacOs)
-    // extern char** environ; // environment variables
-    // execvpe(command->name, command->args, environ); // exec+args+path+environ
-
-    /// This shows how to do exec with auto-path resolve
-    // add a NULL argument to the end of args, and the name to the beginning
-    // as required by exec
-
-    // TODO: do your own exec with path resolving using execv()
-    // do so by replacing the execvp call below
-    
+  if (pid == 0) { // child
 
     //part 2
     int ioflag;
@@ -567,9 +531,9 @@ if (strcmp(command->next->name, "cut") == 0) {
     }
 
     //part 3
-if (strcmp(command->name, "cut") == 0) {
+    if (strcmp(command->name, "cut") == 0) {
     exit(shellish_cut(command));
-}
+    }
     //part 1
     char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
     char *copyPath = strdup(getPath); //tokenizer edit countermeasure
@@ -587,13 +551,14 @@ if (strcmp(command->name, "cut") == 0) {
     printf("-%s: %s: command not found\n", sysname, command->name);
     free(copyPath); //mem leak countermeasure
     exit(127);
-  } else {
+    } 
+    else {
     if(command->background) { //'&' arg passed case aka bg case
 	    return SUCCESS; //don't wait, return immediately
     } 
     wait(0); // wait for child process to finish
     return SUCCESS;
-  }
+    }
   }
 }
 
