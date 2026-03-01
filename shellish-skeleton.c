@@ -250,6 +250,7 @@ int prompt(struct command_t *command) {
   buf[0] = 0;
   while (1) {
     c = getchar();
+    if (c == '\r') c = '\n';
     // printf("Keycode: %u\n", c); // DEBUG: uncomment for debugging
 
     if (c == 9) // handle tab
@@ -713,8 +714,20 @@ int process_command(struct command_t *command) {
     curr = curr->next;
   }
 
+	for (int j = 0; j < num_cmd - 1; j++) {
+    close(piperw[j][0]);
+    close(piperw[j][1]);
+}
 
+	for (int i = 0; i < num_cmd; i++) {
+    		waitpid(childs[i], NULL, 0);
+	}
+
+	free(piperw);
+	free(childs);
+	return SUCCESS;
   }
+
   else {
   pid_t pid = fork();
   if (pid == 0) { // child
