@@ -9,6 +9,8 @@
 #include <fcntl.h> // for open() and flags and stuff
 #include <sys/stat.h> //for named pipes
 #include <dirent.h> //for chatroom dirs
+#include <time.h>
+#include <limits.h>
 const char *sysname = "shellish";
 
 enum return_codes {
@@ -378,16 +380,6 @@ int shellish_cut(struct command_t *command) {
     	cur++;
 	}	
 
-	//char *parts[1024];
-        //int num_parts = 0;
-        //char d[2] = { delim, '\0' }; //either delim or terminate string 
-
-        //char *tokptr = strtok(line, d);
-        //while (tokptr != NULL && num_parts < 1024) {
-          //  parts[num_parts++] = tokptr;
-           // tokptr = strtok(NULL, d);
-        //}
-
         for (int k = 0; k < num_fields; k++) {
             int l = fields_arr[k];    
             if (k > 0) putchar(delim);
@@ -400,9 +392,6 @@ int shellish_cut(struct command_t *command) {
     }
 
     return 0;
-
-	
-
 
 }
 
@@ -507,6 +496,113 @@ int shellish_chatroom(struct command_t *command) {
   }
 }
 
+//part 3-c -> trash. makes a trash dir, places trash files by command, allows restoration (limited)
+
+//helper 1: makes the dir if doesn't exist
+static int make_trash_dir(char *trashDir, size_t size) {
+  const char *home = getenv("HOME");
+  if (home == NULL) return -1; //(spiderman) no home (or stg)
+  if (snprintf(trashDir, size, "%s/.shellish_trash", home) >= (int) size) return -1; 
+
+  struct stat st;
+  if (stat(trashDir, &st) == 0) return S_ISDIR(st.st_mode) ? 0 : -1;
+  return mkdir(trashDir, 0700);
+}
+
+//helper 2: finds base name (just the last part) since we need that for moving the file around dirs
+static const char *base_name(const char *path) {
+  const char *str = strrchr(path, '/');
+  return str ? (str + 1) : path;
+}
+
+//actual func
+int shellish_trash(struct command_t *command) {
+  char trashDir[PATH_MAX];
+  if (make_trash_dir(trashDir, sizeof(trashDir)) == -1) {return UNKNOWN;}
+
+  if (!command->args[1]) {return UNKNOWN;} //nothing entered after trash case
+
+  // case 1: trash ls: iterates over every entry and stores them
+  if (strcmp(command->args[1], "ls") == 0) {
+    DIR *dir = opendir(trashDir);
+    if (!dir) { return UNKNOWN; }
+
+    struct dirent *dirptr;
+    while ((dirptr = readdir(dir))) {
+      if (!strcmp(dirptr->d_name, ".") || !strcmp(dirptr->d_name, "..")) continue; //skips over these since they're not real content
+      printf("%s\n", dirptr->d_name);
+    }
+    closedir(dir);
+    return SUCCESS; //case closed successfully!
+  }
+
+  // case 2: trash restore: if restore is entered as well, finds the newest entry to restore according to info entered
+  if (strcmp(command->args[1], "restore") == 0) {
+    const char *name = command->args[2];
+    if (!name) {return UNKNOWN;}
+
+    DIR *dir = opendir(trashDir);
+    if (!dir) {return UNKNOWN; } //if can't opn dir case
+
+    // Look for newest
+    char newest[NAME_MAX + 1];
+    newest[0] = '\0';
+    long long best_tag = -1; //a long long tag ago, there lived a...
+
+    char prefix[NAME_MAX + 1];
+    snprintf(prefix, sizeof(prefix), "%s__", name); //so it isn't mixed with normal '_'
+    size_t prefixlen = strlen(prefix);
+
+    struct dirent *dirptr;
+    while ((dirptr = readdir(dir))) {
+      if (strncmp(dirptr->d_name, prefix, prefixlen) != 0) continue;
+
+      // parse after "__"
+      const char *ptr = dirptr->d_name + prefixlen; //for parsing
+      char *end = NULL;
+      long long tag = strtoll(ptr, &end, 10);
+      if (end == ptr) continue; // no number
+
+      if (tag > best_tag) { //find best fit
+        best_tag = tag; 
+        strncpy(newest, dirptr->d_name, sizeof(newest) - 1);
+        newest[sizeof(newest) - 1] = '\0';
+      }
+    }
+
+    closedir(dir);
+
+    if (best_tag < 0) { //nothing found
+      return UNKNOWN;
+    }
+
+    //renames it after current dir
+    char from_address[PATH_MAX];
+    if (snprintf(from_address, sizeof(from_address), "%s/%s", trashDir, newest) >= (int)sizeof(from_address)) {return UNKNOWN;}
+
+    // restore into current dir
+    if (rename(from_address, name) == -1) {return UNKNOWN;}
+
+    return SUCCESS;
+  }
+
+  //case 3: move to trash (default)
+  int temp = SUCCESS;
+  for (int i = 1; command->args[i]; i++) {
+    const char *src = command->args[i];
+    const char *bn = base_name(src);
+
+    char dst[PATH_MAX];
+    snprintf(dst, sizeof(dst), "%s/%s__%lld_%d_%d",
+             trashDir, bn, (long long)time(NULL), (int)getpid(), i);
+
+    if (rename(src, dst) == -1) {temp = UNKNOWN;}
+  }
+
+  return temp;
+}
+
+
 int process_command(struct command_t *command) {
   int r;
   if (strcmp(command->name, "") == 0)
@@ -588,6 +684,10 @@ int process_command(struct command_t *command) {
           exit(shellish_chatroom(curr));
         }
 
+        if (strcmp(curr->name, "trash") == 0) {
+          exit(shellish_trash(curr));
+        }
+
         //part 1 - pretty much same as no-pipe
         char *getPath = getenv("PATH");
         char *copyPath = strdup(getPath);
@@ -644,6 +744,10 @@ int process_command(struct command_t *command) {
     //3b
     if (strcmp(command->name, "chatroom") == 0) { 
       exit(shellish_chatroom(command));
+    }
+
+    if (strcmp(command->name, "trash") == 0) {
+      exit(shellish_trash(command));
     }
 
     //part 1
