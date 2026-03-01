@@ -7,6 +7,8 @@
 #include <termios.h> // termios, TCSANOW, ECHO, ICANON
 #include <unistd.h>
 #include <fcntl.h> // for open() and flags and stuff
+#include <sys/stat.h> //for named pipes
+#include <dirent.h> //for chatroom dirs
 const char *sysname = "shellish";
 
 enum return_codes {
@@ -404,6 +406,107 @@ int shellish_cut(struct command_t *command) {
 
 }
 
+//part 3-b: shellish_chatroom
+
+int shellish_chatroom(struct command_t *command) {
+
+  if (command->arg_count < 3) {
+    return UNKNOWN; //error msg if there arent enough args for chatroom [0], roomname [1] and username [2]
+  }
+  
+  char *roomname = command->args[1];
+  char *username = command->args[2];
+
+  //dirs for both vars
+
+  char roomDir[256];
+  strcpy(roomDir,"/tmp/chatroom-");
+  strcat(roomDir, roomname);
+  char userDir[256];
+  strcpy(userDir, roomDir);
+  strcat(userDir, "/");
+  strcat(userDir, username);
+
+  mkdir(roomDir, 0777); //rwx perms
+  mkfifo(userDir, 0666); //rw- perms (since fifo)
+
+  printf("Welcome to %s!\n", roomname);
+
+  pid_t pid = fork();
+
+  if (pid == 0) { //child - responsible for cont read
+    int readFile = open(userDir, O_RDWR);
+    if (readFile < 0) return UNKNOWN; //couldn't open read, error return
+
+    char buf[1024]; //for reading
+    while (1) { //for cont read
+      ssize_t received = read(readFile, buf, sizeof(buf));
+      if (received > 0) { //aka there's sth to write
+	      write(1, "\n", 1);
+      	      write(1, buf, received);
+	      printf("[%s] %s > ", roomname, username);
+	      fflush(stdout);
+      }
+    }
+    close(readFile); //shouldn't be able to reach here unless problem encountered
+    return EXIT;
+  }
+
+  else { //parent - responsible for write
+
+    while (1) {
+      char line[256];
+      char msg[1024];
+
+      printf("[%s] %s > ", roomname, username);
+      fflush(stdout); //in case it refuses to print (-_-)
+
+      if (fgets(line, sizeof(line), stdin) == NULL) break; //fgets failed -> escape loop (nothing to write to)
+      
+      strcpy(msg, "[");
+      strcat(msg, roomname);
+      strcat(msg, "] ");
+      strcat(msg, username);
+      strcat(msg, ": ");
+      strcat(msg, line);
+
+      DIR *dir = opendir(roomDir);
+      if (dir == NULL) { perror("opendir"); continue; }
+
+      while (1) { //lops every user to send the write msg to every one
+        struct dirent *ptr = readdir(dir); //pointer
+	if (ptr == NULL) break;
+
+        //skip cases 
+        if (strcmp(ptr->d_name, ".") == 0) continue; 
+        if (strcmp(ptr->d_name, "..") == 0) continue;
+        if (strcmp(ptr->d_name, username) == 0) continue;
+
+        char other_user[512];
+
+        strcpy(other_user, roomDir);
+        strcat(other_user, "/");
+        strcat(other_user, ptr->d_name);
+
+        pid_t pid = fork();
+        if (pid == 0) { //child case
+            int writeFile = open(other_user, O_WRONLY | O_NONBLOCK); //can sometimes block so needs NONBLOCK too
+            if (writeFile >= 0) { //write to all users case
+                write(writeFile, msg, strlen(msg));
+                close(writeFile);
+            }
+            return EXIT;
+        }
+    }
+
+    closedir(dir);
+
+    //zombie prevention (no apocalypse in this house)
+    while (waitpid(-1, NULL, WNOHANG) > 0) { }
+    }
+  }
+}
+
 int process_command(struct command_t *command) {
   int r;
   if (strcmp(command->name, "") == 0)
@@ -481,6 +584,10 @@ int process_command(struct command_t *command) {
             exit(shellish_cut(curr));
         }
 
+        if (strcmp(curr->name, "chatroom") == 0) {
+          exit(shellish_chatroom(curr));
+        }
+
         //part 1 - pretty much same as no-pipe
         char *getPath = getenv("PATH");
         char *copyPath = strdup(getPath);
@@ -530,10 +637,15 @@ int process_command(struct command_t *command) {
 	    close(ioflag);
     }
 
-    //part 3
+    //part 3a
     if (strcmp(command->name, "cut") == 0) {
     exit(shellish_cut(command));
     }
+    //3b
+    if (strcmp(command->name, "chatroom") == 0) { 
+      exit(shellish_chatroom(command));
+    }
+
     //part 1
     char *getPath = getenv("PATH"); //raw PATH, needs to be tokenized (:)
     char *copyPath = strdup(getPath); //tokenizer edit countermeasure
